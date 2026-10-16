@@ -1,0 +1,24 @@
+{
+  "name": "x402-helius-wallet-intelligence",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "x402-paid Solana wallet intelligence API powered by Helius Wallet API.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node api/index.js",
+    "dev": "node --watch api/index.js",
+    "check": "node --check api/index.js"
+  },
+  "dependencies": {
+    "@x402/core": "^2.6.0",
+    "@x402/evm": "^2.6.0",
+    "@x402/express": "^2.6.0",
+    "@x402/svm": "^2.6.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {}
+}
