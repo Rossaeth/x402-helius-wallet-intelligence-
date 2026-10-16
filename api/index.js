@@ -191,9 +191,28 @@ function buildOpenApi(origin) {
       price: { mode: "fixed", currency: "USD", amount: (PRICE.match(/[\d.]+/) || ["0.01"])[0] },
     },
     parameters: [
-      walletParam,
+      { ...walletParam, required: false, description: "Solana wallet address. Supply as a query parameter; GET JSON body is also supported for agent clients." },
       ...genericQueryParams.filter((p) => route.path !== "/api/wallet/balance-at" || ["mint", "timestamp", "datetime", "slot"].includes(p.name)),
     ],
+    requestBody: {
+      required: false,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: {
+              wallet: { type: "string", minLength: 32, maxLength: 64, description: "Solana wallet address" },
+              limit: { type: "integer", minimum: 1, maximum: 100 },
+              mint: { type: "string" },
+              timestamp: { type: "integer" },
+              datetime: { type: "string", format: "date-time" },
+              slot: { type: "integer" },
+            },
+            required: ["wallet"],
+          },
+        },
+      },
+    },
     responses: {
       "200": { description: "Successful response with wallet intelligence data.", content: { "application/json": { schema: { "$ref": "#/components/schemas/WalletDataResponse" } } } },
       "402": {
@@ -282,7 +301,7 @@ function requirePaymentConfig(_req, res, next) {
 }
 
 function getWallet(req, res) {
-  const wallet = String(req.query.wallet || "").trim();
+  const wallet = String(req.query.wallet || req.body?.wallet || "").trim();
   if (!wallet || wallet.length < 32 || wallet.length > 64) {
     res.status(400).json({ error: "invalid_wallet", message: "Provide a valid Solana wallet in the wallet query parameter." });
     return null;
@@ -432,7 +451,7 @@ Pay-per-request Solana wallet analytics API powered by the Helius Wallet API.
 - Terms: /terms
 
 ## How to call
-All wallet data endpoints use HTTP GET and require the `wallet` query parameter containing a Solana wallet address.
+All wallet data endpoints use HTTP GET and accept a Solana wallet address in the `wallet` query parameter. For agent clients that support GET request bodies, a JSON body with `wallet` is also accepted.
 Call a paid endpoint without payment first. If payment is configured, the server returns HTTP 402 with x402 payment requirements. Follow that challenge using an x402-compatible client, then retry the same request with the payment payload.
 Default price: ${PRICE} per request, in USDC on each configured network. Actual configured networks and payment readiness are reported by /health.
 Do not send API keys or wallet private keys. The Helius API key is server-side only.
