@@ -451,7 +451,7 @@ Pay-per-request Solana wallet analytics API powered by the Helius Wallet API.
 - Terms: /terms
 
 ## How to call
-All wallet data endpoints use HTTP GET and accept a Solana wallet address in the `wallet` query parameter. For agent clients that support GET request bodies, a JSON body with `wallet` is also accepted.
+All wallet data endpoints use HTTP GET and accept a Solana wallet address in the wallet query parameter. For agent clients that support GET request bodies, a JSON body with wallet is also accepted.
 Call a paid endpoint without payment first. If payment is configured, the server returns HTTP 402 with x402 payment requirements. Follow that challenge using an x402-compatible client, then retry the same request with the payment payload.
 Default price: ${PRICE} per request, in USDC on each configured network. Actual configured networks and payment readiness are reported by /health.
 Do not send API keys or wallet private keys. The Helius API key is server-side only.
