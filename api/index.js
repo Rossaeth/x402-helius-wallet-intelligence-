@@ -240,7 +240,7 @@ function buildOpenApi(origin) {
       "/health": {
         get: {
           operationId: "health", summary: "Health and payment configuration", security: [],
-          responses: { "200": { description: "Service health and configured payment networks.", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string" }, name: { type: "string" }, version: { type: "string" } } } } } },
+          responses: { "200": { description: "Service health and configured payment networks.", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string" }, name: { type: "string" }, version: { type: "string" } } } } } } },
         },
       },
       "/openapi.json": { get: { operationId: "getOpenApi", summary: "OpenAPI discovery document", security: [], responses: { "200": { description: "OpenAPI 3.1 discovery document." } } } },
