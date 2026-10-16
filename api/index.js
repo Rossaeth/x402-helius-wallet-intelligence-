@@ -82,34 +82,119 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.get("/openapi.json", (_req, res) => {
-  res.json({
+function publicOrigin(req) {
+  const host = req.get("x-forwarded-host") || req.get("host");
+  const forwardedProto = req.get("x-forwarded-proto");
+  const protocol = forwardedProto ? forwardedProto.split(",")[0].trim() : req.protocol;
+  if (process.env.BASE_URL) return process.env.BASE_URL.replace(/\/+$/, "");
+  return host ? protocol + "://" + host : "https://x402-helius-wallet-intelligence.vercel.app";
+}
+
+function buildOpenApi(origin) {
+  const walletParam = {
+    name: "wallet", in: "query", required: true,
+    description: "Solana wallet address supported by Helius Wallet API.",
+    schema: { type: "string", minLength: 32, maxLength: 64 },
+  };
+  const genericQueryParams = [
+    { name: "limit", in: "query", required: false, description: "Maximum records to return where supported.", schema: { type: "integer", minimum: 1, maximum: 100 } },
+    { name: "before", in: "query", required: false, schema: { type: "string" } },
+    { name: "after", in: "query", required: false, schema: { type: "string" } },
+    { name: "until", in: "query", required: false, schema: { type: "string" } },
+    { name: "mint", in: "query", required: false, description: "Token mint address; required for historical balance lookup.", schema: { type: "string" } },
+    { name: "timestamp", in: "query", required: false, schema: { type: "integer" } },
+    { name: "datetime", in: "query", required: false, schema: { type: "string", format: "date-time" } },
+    { name: "slot", in: "query", required: false, schema: { type: "integer" } },
+    { name: "page", in: "query", required: false, schema: { type: "integer", minimum: 1 } },
+    { name: "sortOrder", in: "query", required: false, schema: { type: "string", enum: ["asc", "desc"] } },
+  ];
+  const paidOperation = (route) => ({
+    summary: route.description,
+    operationId: route.path.replace(/^\/api\//, "").replaceAll("/", "_").replaceAll("-", "_"),
+    description: route.description + ". Requires valid x402 payment before input validation; send the wallet query parameter.",
+    tags: [route.path.startsWith("/api/reports/") ? "Reports" : "Wallet"],
+    security: [{ X402Payment: [] }],
+    "x-payment-info": {
+      protocols: ["x402"],
+      price: { mode: "fixed", currency: "USD", amount: (PRICE.match(/[\d.]+/) || ["0.01"])[0] },
+    },
+    parameters: [
+      walletParam,
+      ...genericQueryParams.filter((p) => route.path !== "/api/wallet/balance-at" || ["mint", "timestamp", "datetime", "slot"].includes(p.name)),
+    ],
+    responses: {
+      "200": { description: "Successful response with wallet intelligence data.", content: { "application/json": { schema: { "$ref": "#/components/schemas/WalletDataResponse" } } } },
+      "402": {
+        description: "Payment required. Contains a valid x402 v2 payment challenge.",
+        headers: { "Payment-Required": { description: "Base64-encoded x402 v2 payment requirements.", schema: { type: "string" } } },
+        content: { "application/json": { schema: { "$ref": "#/components/schemas/PaymentRequiredResponse" } } },
+      },
+      "400": { description: "Invalid query parameters.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
+      "502": { description: "Upstream Helius API failure.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
+      "503": { description: "Provider API key or payment configuration is missing.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
+    },
+  });
+  return {
     openapi: "3.1.0",
     info: {
       title: "x402 Helius Wallet Intelligence",
       version: "1.0.0",
-      description: "Pay-per-request Solana wallet intelligence API powered by Helius Wallet API.",
+      description: "Pay-per-request Solana wallet history, transfers, balances, identity, funding-source lookup, and portfolio/activity reports powered by Helius Wallet API. Paid operations accept x402 payments.",
       contact: { name: "API Support", url: "https://github.com/Rossaeth/x402-helius-wallet-intelligence-" },
     },
-    servers: [{ url: BASE_URL }],
-    paths: Object.fromEntries([
-      ["/health", { get: { summary: "Health status", security: [], responses: { "200": { description: "Service status" } } } }],
-      ...walletRoutes.map((r) => [r.path, {
+    servers: [{ url: origin }],
+    "x-discovery": { ownershipProofs: [] },
+    paths: {
+      "/health": {
         get: {
-          summary: r.description,
-          parameters: [
-            { name: "wallet", in: "query", required: true, schema: { type: "string", minLength: 32 }, description: "Solana wallet address" },
-          ],
-          responses: {
-            "200": { description: "Wallet data returned" },
-            "402": { description: "x402 payment required" },
-            "400": { description: "Invalid or missing input" },
-            "502": { description: "Helius upstream API error" },
+          operationId: "health", summary: "Health and payment configuration", security: [],
+          responses: { "200": { description: "Service health and configured payment networks.", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string" }, name: { type: "string" }, version: { type: "string" } } } } } },
+        },
+      },
+      "/openapi.json": { get: { operationId: "getOpenApi", summary: "OpenAPI discovery document", security: [], responses: { "200": { description: "OpenAPI 3.1 discovery document." } } } },
+      "/.well-known/x402": { get: { operationId: "x402Discovery", summary: "List x402-payable resources", security: [], responses: { "200": { description: "x402scan-compatible resource manifest." } } } },
+      ...Object.fromEntries(walletRoutes.map((route) => [route.path, { get: paidOperation(route) }])),
+    },
+    components: {
+      securitySchemes: {
+        X402Payment: { type: "apiKey", in: "header", name: "Payment-Signature", description: "x402 v2 payment payload supplied by an x402-compatible client after receiving HTTP 402." },
+      },
+      schemas: {
+        WalletDataResponse: {
+          type: "object", required: ["success", "source", "wallet", "data"],
+          properties: {
+            success: { type: "boolean", const: true }, source: { type: "string", example: "Helius Wallet API" },
+            wallet: { type: "string" }, endpoint: { type: "string" }, report: { type: "string" },
+            generatedAt: { type: "string", format: "date-time" }, data: { type: "object", additionalProperties: true },
+            balances: { type: "object", additionalProperties: true }, history: { type: "object", additionalProperties: true },
+            transfers: { type: "object", additionalProperties: true }, summary: { type: "object", additionalProperties: true },
           },
         },
-      }]),
-      ["/openapi.json", { get: { summary: "OpenAPI schema", security: [], responses: { "200": { description: "OpenAPI 3.1 schema" } } } }],
-    ]),
+        PaymentRequiredResponse: {
+          type: "object", description: "Payment challenge metadata may be carried in headers; this body schema documents JSON compatibility.",
+          properties: {
+            x402Version: { type: "integer", const: 2 }, error: { type: "string", example: "payment_required" },
+            accepts: { type: "array", minItems: 1, items: { type: "object", additionalProperties: true } },
+          },
+        },
+        ErrorResponse: { type: "object", required: ["error", "message"], properties: { error: { type: "string" }, message: { type: "string" }, upstreamStatus: { type: "integer" } } },
+      },
+    },
+  };
+}
+
+app.get("/openapi.json", (req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json(buildOpenApi(publicOrigin(req)));
+});
+
+app.get("/.well-known/x402", (req, res) => {
+  const origin = publicOrigin(req);
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({
+    version: 1,
+    resources: walletRoutes.map((route) => origin + route.path),
+    instructions: "Each resource is an x402 v2 paid HTTP endpoint. Call without payment to receive the Payment-Required challenge, then retry with an x402-compatible payment payload. Free discovery documents: /openapi.json and /.well-known/x402.",
   });
 });
 
