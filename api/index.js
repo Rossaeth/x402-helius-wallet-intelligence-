@@ -53,16 +53,88 @@ if (configuredAccepts.length > 0) {
 
   const protectedRoutes = {};
   for (const route of walletRoutes) {
+    const inputSchema = {
+      type: "object",
+      properties: {
+        wallet: { type: "string", description: "Solana wallet address", minLength: 32, maxLength: 64 },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum records where supported" },
+        mint: { type: "string", description: "Token mint for historical balance queries" },
+        timestamp: { type: "integer", description: "Unix timestamp for historical balance queries" },
+        datetime: { type: "string", format: "date-time", description: "ISO timestamp for historical balance queries" },
+        slot: { type: "integer", description: "Solana slot for historical balance queries" },
+      },
+      required: ["wallet"],
+    };
+    const sampleInput = { wallet: "11111111111111111111111111111111" };
+    if (route.path === "/api/wallet/balance-at") {
+      sampleInput.mint = "So11111111111111111111111111111111111111112";
+      sampleInput.timestamp = 1760000000;
+    }
     protectedRoutes[`${route.method} ${route.path}`] = {
       accepts: configuredAccepts,
       description: route.description,
       mimeType: "application/json",
+      serviceName: "Helius Wallet Intel",
+      tags: ["solana", "wallet", "analytics"],
+      iconUrl: "https://www.helius.dev/favicon.ico",
+      extensions: {
+        bazaar: {
+          info: {
+            input: {
+              type: "http",
+              method: route.method,
+              queryParams: sampleInput,
+              inputSchema,
+            },
+            output: {
+              type: "json",
+              example: {
+                success: true,
+                source: "Helius Wallet API",
+                wallet: sampleInput.wallet,
+                endpoint: route.path,
+                data: {},
+              },
+            },
+          },
+          schema: {
+            type: "object",
+            properties: {
+              input: {
+                type: "object",
+                properties: {
+                  type: { type: "string", const: "http" },
+                  method: { type: "string", const: "GET" },
+                  queryParams: { type: "object", additionalProperties: true },
+                  inputSchema: { type: "object", additionalProperties: true },
+                },
+                required: ["type", "method"],
+              },
+              output: {
+                type: "object",
+                properties: {
+                  type: { type: "string", const: "json" },
+                  example: { type: "object", additionalProperties: true },
+                },
+                required: ["type"],
+              },
+            },
+            required: ["input", "output"],
+          },
+        },
+      },
     };
   }
   app.use(paymentMiddleware(protectedRoutes, resourceServer));
 }
 
 // Free routes
+app.get("/favicon.ico", (_req, res) => {
+  res.set("Content-Type", "image/svg+xml");
+  res.set("Cache-Control", "public, max-age=86400");
+  res.send('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#111827"/><path d="M32 9 49 19v26L32 55 15 45V19z" fill="#14F195"/><path d="M23 25h18v5H23zm0 9h18v5H23z" fill="#111827"/></svg>');
+});
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
