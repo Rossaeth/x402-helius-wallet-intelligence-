@@ -187,7 +187,7 @@ function buildOpenApi(origin) {
     tags: [route.path.startsWith("/api/reports/") ? "Reports" : "Wallet"],
     security: [{ X402Payment: [] }],
     "x-payment-info": {
-      protocols: ["x402"],
+      protocols: [{ x402: {} }],
       price: { mode: "fixed", currency: "USD", amount: (PRICE.match(/[\d.]+/) || ["0.01"])[0] },
     },
     parameters: [
@@ -197,13 +197,13 @@ function buildOpenApi(origin) {
     responses: {
       "200": { description: "Successful response with wallet intelligence data.", content: { "application/json": { schema: { "$ref": "#/components/schemas/WalletDataResponse" } } } },
       "402": {
-        description: "Payment required. Contains a valid x402 v2 payment challenge.",
-        headers: { "Payment-Required": { description: "Base64-encoded x402 v2 payment requirements.", schema: { type: "string" } } },
+        description: "Payment Required. Send a valid x402 v2 payment challenge response.",
+        headers: { "Payment-Required": { description: "x402 v2 payment requirements.", schema: { type: "string" } } },
         content: { "application/json": { schema: { "$ref": "#/components/schemas/PaymentRequiredResponse" } } },
       },
-      "400": { description: "Invalid query parameters.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
-      "502": { description: "Upstream Helius API failure.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
-      "503": { description: "Provider API key or payment configuration is missing.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } },
+      "400": { description: "Invalid query parameters.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } } },
+      "502": { description: "Upstream Helius API failure.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } } },
+      "503": { description: "Provider API key or payment configuration is missing.", content: { "application/json": { schema: { "$ref": "#/components/schemas/ErrorResponse" } } } },
     },
   });
   return {
@@ -212,6 +212,7 @@ function buildOpenApi(origin) {
       title: "x402 Helius Wallet Intelligence",
       version: "1.0.0",
       description: "Pay-per-request Solana wallet history, transfers, balances, identity, funding-source lookup, and portfolio/activity reports powered by Helius Wallet API. Paid operations accept x402 payments.",
+      "x-guidance": "Use GET /api/wallet/history, /api/wallet/transfers, /api/wallet/balances, /api/wallet/balance-at, /api/wallet/identity, or /api/wallet/funded-by for wallet-level data. Use GET /api/reports/portfolio and /api/reports/activity for summarized reports. Supply the Solana wallet as the required wallet query parameter. Each data endpoint is paid per request using x402; call without payment first and follow the HTTP 402 challenge. Default price is $0.01 USDC per request on each configured network. Check /health for live payment configuration. See /llms.txt for usage guidance.",
       contact: { name: "API Support", url: "https://github.com/Rossaeth/x402-helius-wallet-intelligence-" },
     },
     servers: [{ url: origin }],
@@ -411,6 +412,65 @@ app.get("/api/reports/activity", async (req, res) => {
   } catch (error) {
     sendError(res, error);
   }
+});
+
+// Agent-facing discovery and merchant information
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>x402 Helius Wallet Intelligence</title></head><body><main><h1>x402 Helius Wallet Intelligence</h1><p>Pay-per-request Solana wallet intelligence powered by Helius, with x402 USDC payments.</p><ul><li><a href="/openapi.json">OpenAPI 3.1</a></li><li><a href="/llms.txt">Agent instructions</a></li><li><a href="/health">Health and payment configuration</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/terms">Terms</a></li><li><a href="/.well-known/x402">x402 resource manifest</a></li></ul></main></body></html>`);
+});
+
+app.get("/llms.txt", (_req, res) => {
+  res.type("text/plain; charset=utf-8").send(`# x402 Helius Wallet Intelligence
+
+Pay-per-request Solana wallet analytics API powered by the Helius Wallet API.
+
+## Discovery
+- OpenAPI: /openapi.json
+- Payment resource manifest: /.well-known/x402
+- Live configuration: /health
+- Pricing and supported networks: /pricing
+- Terms: /terms
+
+## How to call
+All wallet data endpoints use HTTP GET and require the `wallet` query parameter containing a Solana wallet address.
+Call a paid endpoint without payment first. If payment is configured, the server returns HTTP 402 with x402 payment requirements. Follow that challenge using an x402-compatible client, then retry the same request with the payment payload.
+Default price: ${PRICE} per request, in USDC on each configured network. Actual configured networks and payment readiness are reported by /health.
+Do not send API keys or wallet private keys. The Helius API key is server-side only.
+
+## Endpoints
+- GET /api/wallet/history?wallet=<solana-address> — parsed transaction history
+- GET /api/wallet/transfers?wallet=<solana-address> — native and token transfers
+- GET /api/wallet/balances?wallet=<solana-address> — current balances and USD values
+- GET /api/wallet/balance-at?wallet=<solana-address>&mint=<token-mint>&timestamp=<unix-seconds> — historical token balance
+- GET /api/wallet/identity?wallet=<solana-address> — wallet identity labels and tags (Helius plan may be required)
+- GET /api/wallet/funded-by?wallet=<solana-address> — original SOL funding source (Helius plan may be required)
+- GET /api/reports/portfolio?wallet=<solana-address> — portfolio snapshot
+- GET /api/reports/activity?wallet=<solana-address> — activity summary
+
+Use /openapi.json for parameters and response schemas. Each paid request has one x402 charge; the activity report makes two upstream Helius calls.
+`);
+});
+
+app.get("/pricing", (_req, res) => {
+  res.json({
+    service: "x402 Helius Wallet Intelligence",
+    pricingModel: "fixed per request",
+    price: PRICE,
+    currency: "USD",
+    settlementAsset: "USDC",
+    facilitator: FACILITATOR_URL,
+    networks: [
+      ...(BASE_PAY_TO ? [{ network: BASE_MAINNET, asset: "USDC", payTo: BASE_PAY_TO }] : []),
+      ...(SOLANA_PAY_TO ? [{ network: SOLANA_MAINNET, asset: SOLANA_USDC, payTo: SOLANA_PAY_TO }] : []),
+    ],
+    note: "Only networks with configured recipient addresses are enabled. Check /health for payment status.",
+  });
+});
+
+app.get("/terms", (_req, res) => {
+  res.type("text/plain; charset=utf-8").send(
+    "Terms of use — x402 Helius Wallet Intelligence\n\nThis API provides third-party wallet data retrieved from Helius. Each paid request is charged at the price shown in /pricing and is non-refundable once the provider request has been processed, except where required by law. Data is provided as-is, may be delayed or incomplete, and is not financial, investment, legal, or tax advice. Do not use this API to violate privacy, law, or third-party terms. Never submit private keys or seed phrases. Provider availability and Helius plan limitations apply. Contact: https://github.com/Rossaeth/x402-helius-wallet-intelligence-"
+  );
 });
 
 app.use((_req, res) => res.status(404).json({ error: "not_found", message: "Endpoint not found." }));
